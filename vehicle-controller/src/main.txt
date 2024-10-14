@@ -1,0 +1,100 @@
+#include <Arduino.h>
+#include <HardwareSerial.h>
+#include <Servo.h>
+#include <TaskScheduler.h>
+
+#include "driver.h"
+#include "packets.h"
+#include "utils.h"
+
+#define ENA PA15
+#define IN1 PB3
+#define IN2 PB4
+
+#define IN3 PB5
+#define IN4 PB6
+#define ENB PB7
+
+#define BASE_SERVO_PIN PB1
+#define CLAW_SERVO_PIN PB11
+#define ELBOW_SERVO_PIN PB0
+#define SHOULDER_SERVO_PIN PB10
+
+HardwareSerial debugSerial(PA10, PA9);
+HardwareSerial btSerial(PA3, PA2);
+
+DownStream downStream;
+
+Scheduler runner;
+Driver driver(ENA, IN1, IN2, ENB, IN3, IN4);
+
+Servo clawServo;
+Servo baseServo;
+Servo elbowServo;
+Servo shoulderServo;
+
+void communicationCallback();
+void driveCallback();
+void armCallback();
+
+Task communicationTask(100, TASK_FOREVER, &communicationCallback, &runner, true);
+Task driveTask(100, TASK_FOREVER, &driveCallback, &runner);
+Task armTask(100, TASK_FOREVER, &armCallback, &runner);
+
+void setup() {
+  btSerial.begin(9600);
+  debugSerial.begin(9600);
+
+  driver.init();
+  driver.stop();
+
+  runner.startNow();
+
+  pinMode(PC13, OUTPUT);
+  digitalWrite(PC13, HIGH);
+
+  clawServo.attach(CLAW_SERVO_PIN);
+  baseServo.attach(BASE_SERVO_PIN);
+  elbowServo.attach(ELBOW_SERVO_PIN);
+  shoulderServo.attach(SHOULDER_SERVO_PIN);
+}
+
+void loop() {
+  runner.execute();
+}
+
+void communicationCallback() {
+  if (btSerial.available() >= sizeof(DownStream)) {
+    btSerial.readBytes((char*)&downStream, sizeof(DownStream));
+
+    printRemoteDownStream(debugSerial, downStream);
+    btSerial.flush();
+
+    if (downStream.mode == 0) {
+      debugSerial.println("mode 0");
+      driveTask.enableIfNot();
+      armTask.disable();
+    } else {
+      driveTask.disable();
+      debugSerial.println("mode 0");
+      armTask.enableIfNot();
+    }
+
+  } else {
+    if (btSerial.available()) {
+      debugSerial.println("bt data");
+    } else {
+      debugSerial.println("No bt data");
+    }
+  }
+}
+
+void driveCallback() {
+  driver.drive(&downStream.throttle, &downStream.steering, &downStream.reverse);
+}
+
+void armCallback() {
+  driver.stop();
+
+  baseServo.write(downStream.potM);
+}

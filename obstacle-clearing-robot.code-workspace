@@ -1,0 +1,25 @@
+{
+	"folders": [
+		{
+			"name": "remote-controller",
+			"path": "remote-controller"
+		},
+		{
+			"name": "vehicle-controller",
+			"path": "vehicle-controller"
+		}
+	],
+	"settings": {
+		"cSpell.words": [
+			"Adafruit",
+			"AUTORELOAD",
+			"CLOCKDIVISION",
+			"COUNTERMODE",
+			"GPIO",
+			"GPIOA",
+			"htim",
+			"NOPULL",
+			"Prescaler"
+		]
+	}
+}
