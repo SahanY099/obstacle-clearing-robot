@@ -8,14 +8,12 @@
 #include "packets.h"
 #include "utils.h"
 
-// #define ENA PA15
 #define ENA PA1
 #define IN1 PB3
 #define IN2 PB4
 
 #define IN3 PB5
 #define IN4 PB6
-// #define ENB PB7
 #define ENB PA0
 
 #define TRIG_PIN PB12
@@ -47,9 +45,10 @@ void sonarTaskCallBack();
 void communicationCallback();
 void obstacleClearCallback();
 
-void obstacleClearCallbackRefactored();
-
 bool obstacleDetected = false;
+bool clearingStarted = false;
+uint8_t breakDistance = 30;
+uint8_t collissionDistance = 0;
 
 void setup() {
   driver.init();
@@ -71,9 +70,6 @@ void setup() {
 unsigned long mainPreviousMillis = 0;
 const long mainInterval = 100;
 
-unsigned long obstaclePreviousMillis = 0;
-const long obstacleInterval = 50;
-
 void loop() {
   unsigned long currentMillis = millis();
 
@@ -83,10 +79,15 @@ void loop() {
     communicationCallback();
     sonarTaskCallBack();
 
-    if (!obstacleDetected) {
+    if ((!obstacleDetected && (collissionDistance > breakDistance || collissionDistance == 0)) || (downStream.reverse && downStream.throttle > 1)) {
       driveCallback();
     } else {
-      obstacleClearCallback();
+      driver.stop();
+
+      if (collissionDistance < 10 || clearingStarted) {
+        clearingStarted = true;
+        obstacleClearCallback();
+      }
     }
   }
 }
@@ -115,19 +116,16 @@ void driveCallback() {
   driver.drive(&downStream.throttle, &downStream.steering, &downStream.reverse);
 }
 
-uint8_t obstacleClearDistace = 20;
 uint8_t obstacleCount = 0;
 
 void sonarTaskCallBack() {
-  uint16_t distance = sonar.ping_cm(30);
+  uint8_t distance = sonar.ping_cm(40);
 
-  if (distance > 1 && distance < obstacleClearDistace) {
+  if (distance > 1 && distance < breakDistance) {
     obstacleCount++;
-
     if (obstacleCount > 2) {
       obstacleDetected = true;
-
-      driver.stop();
+      collissionDistance = distance;
 
       debugSerial.print("    detected: ");
       debugSerial.println(distance);
@@ -139,30 +137,72 @@ void sonarTaskCallBack() {
   debugSerial.println(distance);
 
   obstacleCount = 0;
-  obstacleDetected = false;
+  collissionDistance = 0;
 }
 
+unsigned long armPreviousMillis = 0;  // Variable to store the last time an action was performed
+int step = 0;                         // Step counter to track which part of the sequence to execute next
+int i = 30;                           // Initial position for baseServo
+
 void obstacleClearCallback() {
-  baseServo.write(30);
-  delay(1000);
+  unsigned long currentMillis = millis();
 
-  shoulderServo.write(180);
-  delay(1000);
+  switch (step) {
+    case 0:
+      if (currentMillis - armPreviousMillis >= 1000) {
+        baseServo.write(30);
+        armPreviousMillis = currentMillis;
+        step++;
+      }
+      break;
 
-  elbowServo.write(60);
+    case 1:
+      if (currentMillis - armPreviousMillis >= 1000) {
+        shoulderServo.write(180);
+        armPreviousMillis = currentMillis;
+        step++;
+      }
+      break;
 
-  delay(1000);
-  for (int i = 30; i < 150; i += 3) {
-    baseServo.write(i);
-    delay(25);
+    case 2:
+      if (currentMillis - armPreviousMillis >= 1000) {
+        elbowServo.write(60);
+        armPreviousMillis = currentMillis;
+        step++;
+      }
+      break;
+
+    case 3:
+      if (i < 150) {
+        if (currentMillis - armPreviousMillis >= 15) {
+          baseServo.write(i);
+          i += 2;
+          armPreviousMillis = currentMillis;
+        }
+      } else {
+        i = 30;
+        step++;
+      }
+      break;
+
+    case 4:
+      if (currentMillis - armPreviousMillis >= 1000) {
+        shoulderServo.write(130);
+        armPreviousMillis = currentMillis;
+        step++;
+      }
+      break;
+
+    case 5:
+      if (currentMillis - armPreviousMillis >= 1000) {
+        baseServo.write(90);
+        armPreviousMillis = currentMillis;
+        step = 0;
+        obstacleDetected = false;  // Reset flag
+        clearingStarted = false;
+      }
+      break;
   }
-
-  shoulderServo.write(130);
-
-  delay(1000);
-  baseServo.write(90);
-
-  obstacleDetected = false;
 }
 
 void initArm() {
@@ -172,68 +212,6 @@ void initArm() {
   delay(1000);
   baseServo.write(90);
   delay(1000);
-}
-
-unsigned long lastStepTime = 0;
-int step = 0;  // Step to track which part of the sequence we're in
-
-void obstacleClearCallbackRefactored() {
-  unsigned long currentMillis = millis();  // Get current time
-
-  // Step 0: Move base servo to 30 degrees and wait 1 second
-  if (step == 0 && currentMillis - lastStepTime >= 1000) {
-    baseServo.write(30);
-    Serial.println("Base servo set to 30");
-    lastStepTime = currentMillis;
-    step++;
-  }
-
-  // Step 1: Move shoulder servo to 180 degrees and wait 1 second
-  else if (step == 1 && currentMillis - lastStepTime >= 1000) {
-    shoulderServo.write(180);
-    Serial.println("Shoulder servo set to 180");
-    lastStepTime = currentMillis;
-    step++;
-  }
-
-  // Step 2: Move elbow servo to 60 degrees and wait 1 second
-  else if (step == 2 && currentMillis - lastStepTime >= 1000) {
-    elbowServo.write(60);
-    Serial.println("Elbow servo set to 60");
-    lastStepTime = currentMillis;
-    step++;
-  }
-
-  // Step 3: Sweep base servo from 30 to 150 degrees over 25ms increments
-  else if (step == 3 && currentMillis - lastStepTime >= 25) {
-    static int i = 30;  // Starting position
-    if (i < 150) {
-      baseServo.write(i);
-      i += 3;
-      Serial.print("Base servo sweeping to: ");
-      Serial.println(i);
-    } else {
-      i = 30;  // Reset for next time
-      lastStepTime = currentMillis;
-      step++;  // Move to the next step
-    }
-  }
-
-  // Step 4: Reset base servo to 90 degrees and wait 1 second
-  else if (step == 4 && currentMillis - lastStepTime >= 1000) {
-    baseServo.write(90);
-    Serial.println("Base servo reset to 90");
-    lastStepTime = currentMillis;
-    step++;
-  }
-
-  // Step 5: Move shoulder servo back to 130 degrees and complete
-  else if (step == 5 && currentMillis - lastStepTime >= 1000) {
-    shoulderServo.write(130);
-    Serial.println("Shoulder servo set to 130");
-    lastStepTime = currentMillis;
-    step = 0;  // Reset step for next run
-  }
 }
 
 void clearBtSerialBuffer() {
