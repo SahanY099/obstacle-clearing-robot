@@ -45,9 +45,14 @@ void loop() {
       steering = map(xAxis, 480, 0, 0, -255);
     }
 
+    upStream.reverse = false;
+
     if (yAxis >= 550) {
       throttle = map(yAxis, 550, 1023, 0, 255);
       upStream.reverse = true;
+    } else if (yAxis <= 200) {
+      throttle = 150;
+      throttle = throttle * 1023.0 / (float)throttleRatio;
     } else if (yAxis <= 480) {
       upStream.reverse = false;
       throttle = map(yAxis, 480, 0, 0, 255);
@@ -56,6 +61,8 @@ void loop() {
     upStream.steering = steering * (float)steeringRatio / 1023.0;
     upStream.throttle = throttle * (float)throttleRatio / 1023.0;
     upStream.brakeDistance = 50;
+
+    // upStream.throttle = 150;
 
     printDataPacket(upStream);
 
